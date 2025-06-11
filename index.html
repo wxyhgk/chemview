@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+    <html lang="zh">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>分子结构可视化挂件</title>
+        
+        <!-- Tailwind CSS CDN -->
+        <script src="src/tailwind.js"></script>
+        
+        <!-- 3Dmol.js CDN -->
+        <script src="src/3Dmol-min.js"></script>
+        
+        <style>
+            /* 自定义动画 */
+            @keyframes clickScale {
+                0%   { transform: scale(1); }
+                50%  { transform: scale(0.7); }
+                100% { transform: scale(1); }
+            }
+            
+            @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
+            }
+
+            @keyframes scaleIn {
+                from { transform: scale(0.8); opacity: 0; }
+                to { transform: scale(1); opacity: 1; }
+            }
+            
+            .click-scale:active {
+                animation: clickScale 0.2s ease;
+            }
+            
+            .modal-appear {
+                animation: fadeIn 0.3s ease, scaleIn 0.3s ease;
+            }
+            
+            /* 编辑器样式 */
+            #xyz-editor {
+                font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+                resize: none;
+            }
+            
+            /* 挂件适配样式 */
+            html, body {
+                margin: 0;
+                padding: 0;
+                overflow: hidden;
+                height: 100%;
+                width: 100%;
+            }
+            
+            .widget-container {
+                height: 100%;
+                min-height: 200px;
+                display: flex;
+                flex-direction: column;
+            }
+            
+            .panel-content {
+                flex: 1;
+                min-height: 0;
+                overflow: hidden;
+            }
+            
+            .control-bar {
+                flex-shrink: 0;
+            }
+            
+            .title-bar {
+                flex-shrink: 0;
+            }
+
+            /* 3Dmol.js 容器样式 */
+            #molecule-viewer {
+                position: relative !important;
+                width: 100% !important;
+                height: 100% !important;
+                overflow: hidden !important;
+            }
+
+            #molecule-viewer canvas {
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100% !important;
+                height: 100% !important;
+                z-index: 1 !important;
+            }
+
+            #molecule-viewer > div {
+                position: relative !important;
+                width: 100% !important;
+                height: 100% !important;
+                overflow: hidden !important;
+            }
+
+            /* 弹出菜单样式 */
+            .popup-menu {
+                position: absolute;
+                background: white;
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+                z-index: 1000;
+                min-width: 120px;
+                bottom: 100%;
+                margin-bottom: 5px;
+            }
+
+            .popup-menu-item {
+                padding: 8px 12px;
+                cursor: pointer;
+                font-size: 12px;
+                border-bottom: 1px solid #f3f4f6;
+            }
+
+            .popup-menu-item:last-child {
+                border-bottom: none;
+            }
+
+            .popup-menu-item:hover {
+                background-color: #f3f4f6;
+            }
+
+            .popup-menu-item.selected {
+                background-color: #3b82f6;
+                color: white;
+            }
+
+            /* 查看器容器布局 */
+            .viewer-container {
+                position: relative;
+                flex: 1;
+                display: flex;
+            }
+
+            /* 文件路径显示模态框 */
+            .file-path-modal {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: white;
+                border: 1px solid #d1d5db;
+                border-radius: 8px;
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+                z-index: 2000;
+                min-width: 400px;
+                max-width: 80vw;
+            }
+        </style>
+    </head>
+    <body class="bg-gray-50">
+        <div class="widget-container">
+            <!-- 编辑面板 -->
+            <div id="edit-panel" class="hidden flex-col h-full">
+                <!-- 主编辑区域 -->
+                <div class="panel-content relative border border-gray-300">
+                    <textarea 
+                        id="xyz-editor" 
+                        class="w-full h-full p-3 text-sm border-none outline-none resize-none bg-white"
+                        placeholder="请输入分子坐标数据，支持多种格式：
+
+    XYZ格式示例：
+    5
+    Methane CH4 molecule
+    C        0.00000        0.00000        0.00000
+    H        0.62912        0.62912        0.62912
+    H       -0.62912       -0.62912        0.62912
+    H        0.62912       -0.62912       -0.62912
+    H       -0.62912        0.62912       -0.62912
+
+    Gaussian输入格式示例：
+    %chk=water.chk
+    %mem=1GB
+    # B3LYP/6-31G(d) opt
+
+    Water molecule optimization
+
+    0 1
+    O   0.000000   0.000000   0.119262
+    H   0.000000   0.763239  -0.477048
+    H   0.000000  -0.763239  -0.477048
+
+    Orca输入格式示例：
+    ! B3LYP def2-SVP opt
+
+    %maxcore 2048
+
+    * xyz 0 1
+    O   0.000000   0.000000   0.119262
+    H   0.000000   0.763239  -0.477048
+    H   0.000000  -0.763239  -0.477048
+    *"
+                    ></textarea>
+                </div>
+                
+                <!-- 编辑面板控制栏 -->
+                <div class="control-bar h-10 border border-gray-300 bg-white flex items-center justify-between px-3 text-xs">
+                    <!-- 左侧控件 -->
+                    <div class="flex items-center gap-2">
+                        <button 
+                            id="view-button" 
+                            class="flex items-center justify-center w-7 h-7 hover:bg-gray-100 rounded click-scale"
+                            title="查看分子结构"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                            </svg>
+                        </button>
+                        
+                        <!-- 支持更多文件格式 -->
+                        <input 
+                            type="file" 
+                            id="file-input" 
+                            accept=".xyz,.inp,.com,.gjf,.log,.out" 
+                            class="hidden"
+                        >
+                        <button 
+                            id="upload-button" 
+                            class="flex items-center justify-center w-7 h-7 hover:bg-gray-100 rounded click-scale"
+                            title="上传分子文件 (支持XYZ, Gaussian .com/.gjf, Orca .inp格式)"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    
+                    <!-- 右侧控件 -->
+                    <div class="flex items-center gap-2">
+                        <button 
+                            id="example-button" 
+                            class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 click-scale"
+                            title="加载示例分子"
+                        >
+                            示例
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 显示面板 -->
+            <div id="display-panel" class="flex flex-col h-full">
+                <!-- 分子名称标题栏 -->
+                <div class="title-bar h-8 border border-gray-300 bg-blue-50 flex items-center px-3">
+                    <span id="molecule-name" class="text-sm text-gray-800 font-medium">CH₄ 甲烷分子</span>
+                    <span id="file-format" class="text-xs text-gray-500 ml-2">(XYZ)</span>
+                    <span id="view-locked" class="text-xs text-orange-600 ml-2 hidden"> 视图已锁定</span>
+                </div>
+                
+                <!-- 分子查看器容器 -->
+                <div class="viewer-container border-l border-r border-gray-300 bg-white">
+                    <!-- 分子查看器 -->
+                    <div id="molecule-viewer" class="w-full h-full"></div>
+                </div>
+                
+                <!-- 显示面板控制栏 -->
+                <div class="control-bar h-10 border border-gray-300 bg-white flex items-center justify-between px-3 text-xs">
+                    <!-- 左侧控件 -->
+                    <div class="flex items-center gap-2">
+                        <button 
+                            id="edit-button-bottom" 
+                            class="flex items-center justify-center w-7 h-7 hover:bg-gray-100 rounded click-scale"
+                            title="编辑分子数据"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                            </svg>
+                        </button>
+                        
+                        <button 
+                            id="reset-view" 
+                            class="flex items-center justify-center w-7 h-7 hover:bg-gray-100 rounded click-scale"
+                            title="重置视图"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                        </button>
+
+                        <button 
+                            id="lock-view" 
+                            class="flex items-center justify-center w-7 h-7 hover:bg-gray-100 rounded click-scale"
+                            title="锁定当前视图"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                            </svg>
+                        </button>
+
+                        <button 
+                            id="show-file-path" 
+                            class="flex items-center justify-center w-7 h-7 hover:bg-gray-100 rounded click-scale"
+                            title="显示数据文件位置"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                        </button>
+
+                        <button 
+                            id="toggle-atom-labels" 
+                            class="flex items-center justify-center w-7 h-7 hover:bg-gray-100 rounded click-scale"
+                            title="显示/隐藏原子标签"
+                        >
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    
+                    <!-- 中间控件 - 样式和背景 -->
+                    <div class="flex items-center gap-2 relative">
+                        <div class="relative">
+                            <button 
+                                id="style-button" 
+                                class="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 click-scale"
+                                title="切换显示样式"
+                            >
+                                样式
+                            </button>
+                            <div id="style-menu" class="popup-menu hidden">
+                                <div class="popup-menu-item selected" data-value="stick">球棍模型</div>
+                                <div class="popup-menu-item" data-value="sphere">球型模型</div>
+                                <div class="popup-menu-item" data-value="line">线型模型</div>
+                            </div>
+                        </div>
+                        
+                        <div class="relative">
+                            <button 
+                                id="background-button" 
+                                class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 click-scale"
+                                title="切换背景颜色"
+                            >
+                                背景
+                            </button>
+                            <div id="background-menu" class="popup-menu hidden">
+                                <div class="popup-menu-item selected" data-value="white">白色背景</div>
+                                <div class="popup-menu-item" data-value="black">黑色背景</div>
+                                <div class="popup-menu-item" data-value="gray">灰色背景</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 右侧控件 -->
+                    <div class="flex items-center gap-2">
+                        <button 
+                            id="auto-save-toggle" 
+                            class="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600 click-scale"
+                            title="自动保存: 开启"
+                        >
+                            自动保存
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 成功提示 -->
+        <div id="success-toast" class="fixed top-4 right-4 bg-green-500 text-white px-3 py-2 rounded shadow-lg z-50 text-sm hidden">
+            <div class="flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                <span id="success-message">操作成功</span>
+            </div>
+        </div>
+
+        <!-- 错误模态框 -->
+        <div id="error-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+            <div class="bg-white rounded-lg p-4 max-w-sm w-11/12 mx-4 modal-appear">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-base font-semibold text-red-600">操作失败</h2>
+                    <button id="close-modal" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                </div>
+                <p class="text-gray-700 mb-2 text-sm">错误信息：</p>
+                <p id="error-message" class="text-sm text-gray-600 bg-gray-100 p-2 rounded">请检查操作</p>
+            </div>
+        </div>
+
+        <!-- 文件路径显示模态框 -->
+        <div id="file-path-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+            <div class="file-path-modal modal-appear">
+                <div class="flex justify-between items-center p-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800">数据文件位置</h2>
+                    <button id="close-file-path-modal" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                </div>
+                <div class="p-4">
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">文件路径:</label>
+                        <div class="bg-gray-100 p-2 rounded text-sm font-mono break-all" id="file-path-display"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">块ID:</label>
+                        <div class="bg-gray-100 p-2 rounded text-sm font-mono" id="block-id-display"></div>
+                    </div>
+                    <div class="text-xs text-gray-500">
+                        <p> 提示：此JSON文件包含分子数据、视图状态、样式设置等所有信息</p>
+                        <p> 文件位置相对于思源笔记的工作空间目录</p>
+                    </div>
+                </div>
+                <div class="flex justify-end p-4 border-t border-gray-200">
+                    <button id="copy-file-path" class="px-4 py-2 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 click-scale mr-2">
+                        复制路径
+                    </button>
+                    <button id="close-file-path-modal-btn" class="px-4 py-2 text-xs bg-gray-500 text-white rounded hover:bg-gray-600 click-scale">
+                        关闭
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            class SiyuanMoleculeWidget {
+                constructor() {
+                    this.viewer = null;
+                    this.blockId = null;
+                    this.autoSave = true;
+                    this.dataPath = "/data/widgets-data/chemview/";
+                    this.isInitialLoad = true;
+                    this.currentFormat = 'XYZ';
+                    this.currentStyle = 'stick';
+                    this.currentBackground = 'white';
+                    this.savedViewState = null;
+                    this.isViewLocked = false;
+                    this.showingAtomLabels = false;
+                    this.initElements();
+                    this.bindEvents();
+                    this.initWidget();
+                }
+
+                initElements() {
+                    this.editPanel = document.getElementById('edit-panel');
+                    this.displayPanel = document.getElementById('display-panel');
+                    this.xyzEditor = document.getElementById('xyz-editor');
+                    this.viewButton = document.getElementById('view-button');
+                    this.editButtonBottom = document.getElementById('edit-button-bottom');
+                    this.uploadButton = document.getElementById('upload-button');
+                    this.fileInput = document.getElementById('file-input');
+                    this.resetViewButton = document.getElementById('reset-view');
+                    this.lockViewButton = document.getElementById('lock-view');
+                    this.showFilePathButton = document.getElementById('show-file-path');
+                    this.toggleAtomLabelsButton = document.getElementById('toggle-atom-labels');
+                    this.exampleButton = document.getElementById('example-button');
+                    this.autoSaveToggle = document.getElementById('auto-save-toggle');
+                    this.moleculeName = document.getElementById('molecule-name');
+                    this.fileFormat = document.getElementById('file-format');
+                    this.viewLocked = document.getElementById('view-locked');
+                    this.successToast = document.getElementById('success-toast');
+                    this.successMessage = document.getElementById('success-message');
+                    this.errorModal = document.getElementById('error-modal');
+                    this.closeModal = document.getElementById('close-modal');
+                    this.errorMessage = document.getElementById('error-message');
+                    
+                    // 样式和背景控制元素
+                    this.styleButton = document.getElementById('style-button');
+                    this.styleMenu = document.getElementById('style-menu');
+                    this.backgroundButton = document.getElementById('background-button');
+                    this.backgroundMenu = document.getElementById('background-menu');
+
+                    // 文件路径模态框元素
+                    this.filePathModal = document.getElementById('file-path-modal');
+                    this.closeFilePathModal = document.getElementById('close-file-path-modal');
+                    this.closeFilePathModalBtn = document.getElementById('close-file-path-modal-btn');
+                    this.filePathDisplay = document.getElementById('file-path-display');
+                    this.blockIdDisplay = document.getElementById('block-id-display');
+                    this.copyFilePathButton = document.getElementById('copy-file-path');
+                }
+
+                bindEvents() {
+                    this.viewButton.addEventListener('click', () => this.showViewer());
+                    this.editButtonBottom.addEventListener('click', () => this.showEditor());
+                    this.uploadButton.addEventListener('click', () => this.fileInput.click());
+                    this.fileInput.addEventListener('change', (e) => this.handleFileUpload(e));
+                    this.resetViewButton.addEventListener('click', () => this.resetView());
+                    this.lockViewButton.addEventListener('click', () => this.lockCurrentView());
+                    this.showFilePathButton.addEventListener('click', () => this.showFilePathModal());
+                    this.toggleAtomLabelsButton.addEventListener('click', () => this.toggleAtomLabels());
+                    this.exampleButton.addEventListener('click', () => this.loadExample());
+                    this.autoSaveToggle.addEventListener('click', () => this.toggleAutoSave());
+                    this.closeModal.addEventListener('click', () => this.hideErrorModal());
+
+                    // 样式菜单事件
+                    this.styleButton.addEventListener('click', (e) => this.toggleStyleMenu(e));
+                    this.styleMenu.addEventListener('click', (e) => this.handleStyleSelect(e));
+
+                    // 背景菜单事件
+                    this.backgroundButton.addEventListener('click', (e) => this.toggleBackgroundMenu(e));
+                    this.backgroundMenu.addEventListener('click', (e) => this.handleBackgroundSelect(e));
+
+                    // 文件路径模态框事件
+                    this.closeFilePathModal.addEventListener('click', () => this.hideFilePathModal());
+                    this.closeFilePathModalBtn.addEventListener('click', () => this.hideFilePathModal());
+                    this.copyFilePathButton.addEventListener('click', () => this.copyFilePath());
+
+                    // 点击其他地方关闭菜单
+                    document.addEventListener('click', (e) => this.handleOutsideClick(e));
+                }
+
+                toggleStyleMenu(e) {
+                    e.stopPropagation();
+                    this.backgroundMenu.classList.add('hidden');
+                    
+                    if (this.styleMenu.classList.contains('hidden')) {
+                        this.styleMenu.classList.remove('hidden');
+                    } else {
+                        this.styleMenu.classList.add('hidden');
+                    }
+                }
+
+                toggleBackgroundMenu(e) {
+                    e.stopPropagation();
+                    this.styleMenu.classList.add('hidden');
+                    
+                    if (this.backgroundMenu.classList.contains('hidden')) {
+                        this.backgroundMenu.classList.remove('hidden');
+                    } else {
+                        this.backgroundMenu.classList.add('hidden');
+                    }
+                }
+
+                handleStyleSelect(e) {
+                    const item = e.target.closest('.popup-menu-item');
+                    if (!item) return;
+
+                    const value = item.dataset.value;
+                    this.currentStyle = value;
+                    
+                    // 更新选中状态
+                    this.styleMenu.querySelectorAll('.popup-menu-item').forEach(el => {
+                        el.classList.remove('selected');
+                    });
+                    item.classList.add('selected');
+                    
+                    // 更新样式
+                    this.updateStyle();
+                    this.styleMenu.classList.add('hidden');
+                }
+
+                handleBackgroundSelect(e) {
+                    const item = e.target.closest('.popup-menu-item');
+                    if (!item) return;
+
+                    const value = item.dataset.value;
+                    this.currentBackground = value;
+                    
+                    // 更新选中状态
+                    this.backgroundMenu.querySelectorAll('.popup-menu-item').forEach(el => {
+                        el.classList.remove('selected');
+                    });
+                    item.classList.add('selected');
+                    
+                    // 更新背景
+                    this.updateBackground();
+                    this.backgroundMenu.classList.add('hidden');
+                }
+
+                handleOutsideClick(e) {
+                    if (!this.styleButton.contains(e.target) && !this.styleMenu.contains(e.target)) {
+                        this.styleMenu.classList.add('hidden');
+                    }
+                    if (!this.backgroundButton.contains(e.target) && !this.backgroundMenu.contains(e.target)) {
+                        this.backgroundMenu.classList.add('hidden');
+                    }
+                }
+
+                // 显示文件路径模态框
+                showFilePathModal() {
+                    const filePath = `${this.dataPath}${this.blockId}.json`;
+                    this.filePathDisplay.textContent = filePath;
+                    this.blockIdDisplay.textContent = this.blockId;
+                    this.filePathModal.classList.remove('hidden');
+                    this.filePathModal.classList.add('flex');
+                }
+
+                // 隐藏文件路径模态框
+                hideFilePathModal() {
+                    this.filePathModal.classList.add('hidden');
+                    this.filePathModal.classList.remove('flex');
+                }
+
+                // 复制文件路径
+                copyFilePath() {
+                    const filePath = `${this.dataPath}${this.blockId}.json`;
+                    navigator.clipboard.writeText(filePath).then(() => {
+                        this.showSuccess('文件路径已复制到剪贴板');
+                        this.hideFilePathModal();
+                    }).catch(() => {
+                        this.showError('复制失败，请手动复制');
+                    });
+                }
+
+                // 切换原子标签显示
+                toggleAtomLabels() {
+                    if (!this.viewer) return;
+
+                    if (this.showingAtomLabels) {
+                        // 隐藏标签
+                        this.viewer.removeAllLabels();
+                        this.showingAtomLabels = false;
+                        this.toggleAtomLabelsButton.style.backgroundColor = '';
+                        this.showSuccess('已隐藏原子标签');
+                    } else {
+                        // 显示标签
+                        this.addAtomLabels();
+                        this.showingAtomLabels = true;
+                        this.toggleAtomLabelsButton.style.backgroundColor = '#f59e0b';
+                        this.showSuccess('已显示原子标签（元素符号+序号）');
+                    }
+                    this.viewer.render();
+                }
+
+                // 添加原子标签
+                addAtomLabels() {
+                    if (!this.viewer) return;
+
+                    try {
+                        // 显示元素符号标签
+                        this.viewer.addPropertyLabels("elem", {}, {
+                            fontColor: 'black',
+                            font: 'Arial',
+                            fontSize: 14,
+                            showBackground: true,
+                            backgroundColor: 'white',
+                            backgroundOpacity: 0.8,
+                            alignment: 'center'
+                        });
+
+                        // 显示原子序号标签（稍微偏移位置避免重叠）
+                        this.viewer.addPropertyLabels("serial", {}, {
+                            fontColor: 'blue',
+                            font: 'Arial',
+                            fontSize: 12,
+                            showBackground: true,
+                            backgroundColor: 'lightyellow',
+                            backgroundOpacity: 0.7,
+                            alignment: 'center',
+                            screenOffset: {x: 15, y: -10}
+                        });
+
+                    } catch (error) {
+                        console.warn('添加原子标签失败:', error);
+                        this.showError('添加原子标签失败');
+                    }
+                }
+
+                // 获取当前视图状态
+                getCurrentViewState() {
+                    if (!this.viewer || !this.viewer.rotationGroup) return null;
+                    
+                    try {
+                        const rotationGroup = this.viewer.rotationGroup;
+                        const modelGroup = this.viewer.modelGroup;
+                        
+                        return {
+                            rotationPosition: {
+                                x: rotationGroup.position.x,
+                                y: rotationGroup.position.y,
+                                z: rotationGroup.position.z
+                            },
+                            rotationQuaternion: {
+                                x: rotationGroup.quaternion.x,
+                                y: rotationGroup.quaternion.y,
+                                z: rotationGroup.quaternion.z,
+                                w: rotationGroup.quaternion.w
+                            },
+                            modelPosition: {
+                                x: modelGroup.position.x,
+                                y: modelGroup.position.y,
+                                z: modelGroup.position.z
+                            },
+                            cameraZ: this.viewer.CAMERA_Z,
+                            style: this.currentStyle,
+                            background: this.currentBackground,
+                            showingAtomLabels: this.showingAtomLabels
+                        };
+                    } catch (error) {
+                        console.warn('无法获取视图状态:', error);
+                        return null;
+                    }
+                }
+
+                // 应用视图状态
+                applyViewState(viewState) {
+                    if (!this.viewer || !viewState) return;
+                    
+                    try {
+                        // 应用旋转组的位置和旋转
+                        if (viewState.rotationPosition) {
+                            this.viewer.rotationGroup.position.set(
+                                viewState.rotationPosition.x,
+                                viewState.rotationPosition.y,
+                                viewState.rotationPosition.z
+                            );
+                        }
+                        
+                        if (viewState.rotationQuaternion) {
+                            this.viewer.rotationGroup.quaternion.set(
+                                viewState.rotationQuaternion.x,
+                                viewState.rotationQuaternion.y,
+                                viewState.rotationQuaternion.z,
+                                viewState.rotationQuaternion.w
+                            );
+                        }
+                        
+                        // 应用模型组的位置
+                        if (viewState.modelPosition) {
+                            this.viewer.modelGroup.position.set(
+                                viewState.modelPosition.x,
+                                viewState.modelPosition.y,
+                                viewState.modelPosition.z
+                            );
+                        }
+                        
+                        // 应用相机参数
+                        if (viewState.cameraZ) {
+                            this.viewer.CAMERA_Z = viewState.cameraZ;
+                        }
+                        
+                        // 应用样式
+                        if (viewState.style) {
+                            this.currentStyle = viewState.style;
+                            this.updateStyleMenuSelection();
+                            this.updateStyle();
+                        }
+                        
+                        // 应用背景
+                        if (viewState.background) {
+                            this.currentBackground = viewState.background;
+                            this.updateBackgroundMenuSelection();
+                            this.updateBackground();
+                        }
+
+                        // 应用原子标签状态
+                        if (viewState.showingAtomLabels !== undefined) {
+                            this.showingAtomLabels = viewState.showingAtomLabels;
+                            if (this.showingAtomLabels) {
+                                this.addAtomLabels();
+                                this.toggleAtomLabelsButton.style.backgroundColor = '#f59e0b';
+                            }
+                        }
+                        
+                        this.viewer.render();
+                        console.log('视图状态已恢复');
+                    } catch (error) {
+                        console.warn('无法应用视图状态:', error);
+                        this.showError('无法恢复保存的视图状态');
+                    }
+                }
+
+                // 更新样式菜单选中状态
+                updateStyleMenuSelection() {
+                    this.styleMenu.querySelectorAll('.popup-menu-item').forEach(el => {
+                        el.classList.remove('selected');
+                        if (el.dataset.value === this.currentStyle) {
+                            el.classList.add('selected');
+                        }
+                    });
+                }
+
+                // 更新背景菜单选中状态
+                updateBackgroundMenuSelection() {
+                    this.backgroundMenu.querySelectorAll('.popup-menu-item').forEach(el => {
+                        el.classList.remove('selected');
+                        if (el.dataset.value === this.currentBackground) {
+                            el.classList.add('selected');
+                        }
+                    });
+                }
+
+                // 锁定当前视图
+                lockCurrentView() {
+                    const viewState = this.getCurrentViewState();
+                    if (viewState) {
+                        this.savedViewState = viewState;
+                        this.isViewLocked = true;
+                        this.viewLocked.classList.remove('hidden');
+                        this.showSuccess('视图已锁定，包含旋转、缩放、样式、标签等所有设置');
+                        console.log('锁定的视图状态:', viewState);
+                        
+                        // 自动保存
+                        setTimeout(() => {
+                            this.saveData();
+                        }, 500);
+                    } else {
+                        this.showError('无法获取当前视图状态');
+                    }
+                }
+
+                // 文件格式检测
+                detectFileFormat(content) {
+                    const lines = content.trim().split('\n');
+                    const cleanContent = content.toLowerCase().trim();
+                    
+                    if (cleanContent.includes('* xyz') || cleanContent.includes('*xyz') || 
+                        lines.some(line => line.trim().startsWith('!'))) {
+                        return 'ORCA';
+                    }
+                    
+                    const hasPercentCommand = lines.some(line => line.trim().startsWith('%'));
+                    const hasRouteSection = lines.some(line => line.trim().startsWith('#'));
+                    const hasChargeSpinPattern = lines.some(line => {
+                        const trimmed = line.trim();
+                        return /^[-+]?\d+\s+\d+\s*$/.test(trimmed);
+                    });
+                    
+                    if (hasPercentCommand || hasRouteSection || hasChargeSpinPattern) {
+                        return 'GAUSSIAN';
+                    }
+                    
+                    if (lines.length > 0 && /^\s*\d+\s*$/.test(lines[0].trim())) {
+                        return 'XYZ';
+                    }
+                    
+                    return 'XYZ';
+                }
+
+                // 解析Orca输入文件
+                parseOrcaInput(content) {
+                    const lines = content.split('\n');
+                    const coordinates = [];
+                    let inCoordSection = false;
+                    let title = 'Orca Molecule';
+                    let charge = 0;
+                    let multiplicity = 1;
+                    
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        
+                        if (line.startsWith('!') && !title.includes('Method:')) {
+                            const method = line.substring(1).trim();
+                            if (method) {
+                                title = `Orca Molecule (Method: ${method})`;
+                            }
+                        }
+                        
+                        if (line.match(/^\*\s*xyz\s+(-?\d+)\s+(\d+)/i)) {
+                            const match = line.match(/^\*\s*xyz\s+(-?\d+)\s+(\d+)/i);
+                            charge = parseInt(match[1]);
+                            multiplicity = parseInt(match[2]);
+                            inCoordSection = true;
+                            continue;
+                        }
+                        
+                        if (inCoordSection && line === '*') {
+                            break;
+                        }
+                        
+                        if (inCoordSection && line) {
+                            const parts = line.split(/\s+/);
+                            if (parts.length >= 4) {
+                                const element = parts[0];
+                                const x = parseFloat(parts[1]);
+                                const y = parseFloat(parts[2]);
+                                const z = parseFloat(parts[3]);
+                                
+                                if (!isNaN(x) && !isNaN(y) && !isNaN(z) && 
+                                    element.match(/^[A-Za-z]{1,2}$/)) {
+                                    coordinates.push({ element, x, y, z });
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (coordinates.length === 0) {
+                        throw new Error('在Orca输入文件中未找到有效的坐标数据');
+                    }
+                    
+                    return this.coordinatesToXYZ(coordinates, title);
+                }
+
+                // 解析Gaussian输入文件
+                parseGaussianInput(content) {
+                    const lines = content.split('\n');
+                    const coordinates = [];
+                    let title = 'Gaussian Molecule';
+                    let inCoordSection = false;
+                    let foundChargeSpinLine = false;
+                    let routeSection = '';
+                    let titleSection = '';
+                    let blankLineCount = 0;
+                    let afterRoute = false;
+                    
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        
+                        if (line.startsWith('#')) {
+                            routeSection = line;
+                            afterRoute = true;
+                            continue;
+                        }
+                        
+                        if (afterRoute && !line) {
+                            blankLineCount++;
+                            continue;
+                        }
+                        
+                        if (afterRoute && blankLineCount === 1 && line && !foundChargeSpinLine) {
+                            titleSection = line;
+                            if (routeSection) {
+                                title = `${titleSection} (${routeSection})`;
+                            } else {
+                                title = titleSection;
+                            }
+                            continue;
+                        }
+                        
+                        if (afterRoute && blankLineCount >= 2 && !foundChargeSpinLine && 
+                            /^\s*[-+]?\d+\s+\d+\s*$/.test(line)) {
+                            foundChargeSpinLine = true;
+                            inCoordSection = true;
+                            continue;
+                        }
+                        
+                        if (inCoordSection && line) {
+                            const parts = line.split(/\s+/);
+                            if (parts.length >= 4) {
+                                const element = parts[0];
+                                const x = parseFloat(parts[1]);
+                                const y = parseFloat(parts[2]);
+                                const z = parseFloat(parts[3]);
+                                
+                                if (!isNaN(x) && !isNaN(y) && !isNaN(z) && 
+                                    element.match(/^[A-Za-z]{1,2}$/)) {
+                                    coordinates.push({ element, x, y, z });
+                                } else {
+                                    break;
+                                }
+                            } else if (parts.length === 1 && !isNaN(parseFloat(parts[0]))) {
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (coordinates.length === 0) {
+                        throw new Error('在Gaussian输入文件中未找到有效的坐标数据');
+                    }
+                    
+                    return this.coordinatesToXYZ(coordinates, title);
+                }
+
+                // 将坐标数组转换为XYZ格式
+                coordinatesToXYZ(coordinates, title = 'Molecule') {
+                    if (coordinates.length === 0) {
+                        throw new Error('未找到有效的坐标数据');
+                    }
+                    
+                    let xyzContent = coordinates.length + '\n';
+                    xyzContent += title + '\n';
+                    
+                    coordinates.forEach(coord => {
+                        xyzContent += `${coord.element.padEnd(2)} ${coord.x.toFixed(6).padStart(12)} ${coord.y.toFixed(6).padStart(12)} ${coord.z.toFixed(6).padStart(12)}\n`;
+                    });
+                    
+                    return xyzContent;
+                }
+
+                // 解析输入内容
+                parseInput(content) {
+                    const format = this.detectFileFormat(content);
+                    this.currentFormat = format;
+                    
+                    try {
+                        switch (format) {
+                            case 'ORCA':
+                                return this.parseOrcaInput(content);
+                            case 'GAUSSIAN':
+                                return this.parseGaussianInput(content);
+                            case 'XYZ':
+                            default:
+                                const lines = content.trim().split('\n');
+                                if (lines.length < 3) {
+                                    throw new Error('XYZ文件格式不正确，至少需要3行');
+                                }
+                                const atomCount = parseInt(lines[0].trim());
+                                if (isNaN(atomCount) || atomCount <= 0) {
+                                    throw new Error('XYZ文件第一行应为原子数量');
+                                }
+                                return content;
+                        }
+                    } catch (error) {
+                        throw new Error(`解析${format}格式失败: ${error.message}`);
+                    }
+                }
+
+                async initWidget() {
+                    try {
+                        this.blockId = this.getBlockId();
+                        console.log('挂件块ID:', this.blockId);
+                        await this.loadData();
+                    } catch (error) {
+                        console.error('初始化挂件失败:', error);
+                        this.loadExample(true);
+                    } finally {
+                        setTimeout(() => {
+                            this.isInitialLoad = false;
+                        }, 1000);
+                    }
+                }
+
+                getBlockId() {
+                    try {
+                        const id = window.frameElement?.parentElement?.parentElement?.getAttribute("data-node-id");
+                        return id || 'default';
+                    } catch (error) {
+                        console.warn('无法获取块ID，使用默认ID');
+                        return 'default';
+                    }
+                }
+
+                async putFileContent(path, content) {
+                    const formData = new FormData();
+                    formData.append("path", path);
+                    formData.append("file", new Blob([content], { type: 'application/json' }));
+                    
+                    try {
+                        const response = await fetch("/api/file/putFile", {
+                            method: "POST",
+                            body: formData,
+                        });
+                        
+                        if (response.ok) {
+                            return true;
+                        } else {
+                            throw new Error("保存文件失败");
+                        }
+                    } catch (error) {
+                        console.error("写入文件错误:", error);
+                        throw error;
+                    }
+                }
+
+                async getFileContent(path) {
+                    try {
+                        const response = await fetch("/api/file/getFile", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                            },
+                            body: JSON.stringify({ path }),
+                        });
+                        
+                        if (response.ok) {
+                            return await response.text();
+                        } else if (response.status === 404) {
+                            return null;
+                        } else {
+                            throw new Error("读取文件失败");
+                        }
+                    } catch (error) {
+                        console.error("读取文件错误:", error);
+                        return null;
+                    }
+                }
+
+                async saveData() {
+                    const inputData = this.xyzEditor.value.trim();
+                    if (!inputData) {
+                        this.showError('没有数据可保存');
+                        return;
+                    }
+
+                    try {
+                        // 获取当前视图状态（如果没有锁定状态，使用当前状态）
+                        const viewState = this.savedViewState || this.getCurrentViewState();
+                        
+                        const data = {
+                            input: inputData,
+                            format: this.currentFormat,
+                            style: this.currentStyle,
+                            background: this.currentBackground,
+                            viewState: viewState,
+                            isViewLocked: this.isViewLocked,
+                            showingAtomLabels: this.showingAtomLabels,
+                            timestamp: Date.now()
+                        };
+
+                        const filePath = `${this.dataPath}${this.blockId}.json`;
+                        await this.putFileContent(filePath, JSON.stringify(data, null, 2));
+                        
+                        const message = this.isViewLocked ? '分子数据和锁定视图已保存' : '分子数据已保存';
+                        this.showSuccess(message);
+                    } catch (error) {
+                        this.showError('保存失败: ' + error.message);
+                    }
+                }
+
+                async loadData() {
+                    try {
+                        const filePath = `${this.dataPath}${this.blockId}.json`;
+                        const content = await this.getFileContent(filePath);
+                        
+                        if (content) {
+                            const data = JSON.parse(content);
+                            this.xyzEditor.value = data.input || data.xyz || '';
+                            this.currentFormat = data.format || 'XYZ';
+                            this.currentStyle = data.style || 'stick';
+                            this.currentBackground = data.background || 'white';
+                            this.savedViewState = data.viewState || null;
+                            this.isViewLocked = data.isViewLocked || false;
+                            this.showingAtomLabels = data.showingAtomLabels || false;
+                            
+                            // 更新视图锁定状态显示
+                            if (this.isViewLocked) {
+                                this.viewLocked.classList.remove('hidden');
+                            }
+                            
+                            if (data.input || data.xyz) {
+                                setTimeout(() => {
+                                    this.initViewer();
+                                    const xyzData = this.parseInput(data.input || data.xyz);
+                                    this.renderMolecule(xyzData);
+                                    
+                                    // 如果有保存的视图状态，应用它
+                                    if (this.savedViewState) {
+                                        setTimeout(() => {
+                                            this.applyViewState(this.savedViewState);
+                                        }, 500);
+                                    }
+                                }, 100);
+                            } else {
+                                this.loadExample(true);
+                            }
+                        } else {
+                            this.loadExample(true);
+                        }
+                    } catch (error) {
+                        console.error('加载数据失败:', error);
+                        this.loadExample(true);
+                    }
+                }
+
+                toggleAutoSave() {
+                    this.autoSave = !this.autoSave;
+                    this.autoSaveToggle.textContent = this.autoSave ? '自动保存' : '手动保存';
+                    this.autoSaveToggle.title = `自动保存: ${this.autoSave ? '开启' : '关闭'}`;
+                    this.autoSaveToggle.className = this.autoSave 
+                        ? 'px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600 click-scale'
+                        : 'px-2 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600 click-scale';
+                }
+
+                loadExample(autoRender = false) {
+                    const exampleXYZ = `5
+    Methane CH4 molecule
+    C        0.00000        0.00000        0.00000
+    H        0.62912        0.62912        0.62912
+    H       -0.62912       -0.62912        0.62912
+    H        0.62912       -0.62912       -0.62912
+    H       -0.62912        0.62912       -0.62912`;
+                    
+                    this.xyzEditor.value = exampleXYZ;
+                    this.currentFormat = 'XYZ';
+                    
+                    if (autoRender) {
+                        setTimeout(() => {
+                            this.initViewer();
+                            this.renderMolecule(exampleXYZ);
+                        }, 100);
+                    }
+                }
+
+                handleFileUpload(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const content = e.target.result;
+                            this.xyzEditor.value = content;
+                            
+                            this.currentFormat = this.detectFileFormat(content);
+                            this.showSuccess(`已加载 ${this.currentFormat} 格式文件: ${file.name}`);
+                        } catch (error) {
+                            this.showError('文件加载失败: ' + error.message);
+                        }
+                    };
+                    
+                    reader.onerror = () => {
+                        this.showError('文件读取失败');
+                    };
+                    
+                    reader.readAsText(file);
+                }
+
+                showViewer() {
+                    const inputData = this.xyzEditor.value.trim();
+                    if (!inputData) {
+                        this.showError('请输入分子数据或上传文件');
+                        return;
+                    }
+
+                    try {
+                        const xyzData = this.parseInput(inputData);
+                        
+                        this.editPanel.classList.add('hidden');
+                        this.editPanel.classList.remove('flex');
+                        this.displayPanel.classList.remove('hidden');
+                        this.displayPanel.classList.add('flex');
+
+                        this.initViewer();
+                        this.renderMolecule(xyzData);
+                        
+                        this.fileFormat.textContent = `(${this.currentFormat})`;
+                        
+                        if (this.autoSave && !this.isInitialLoad) {
+                            setTimeout(() => {
+                                this.saveData();
+                            }, 500);
+                        }
+                    } catch (error) {
+                        this.showError('解析失败: ' + error.message);
+                    }
+                }
+
+                showEditor() {
+                    this.displayPanel.classList.add('hidden');
+                    this.displayPanel.classList.remove('flex');
+                    this.editPanel.classList.remove('hidden');
+                    this.editPanel.classList.add('flex');
+                }
+
+                initViewer() {
+                    const element = document.getElementById('molecule-viewer');
+                    
+                    if (this.viewer) {
+                        this.viewer.clear();
+                        this.viewer = null;
+                    }
+                    
+                    element.innerHTML = '';
+                    
+                    const rect = element.getBoundingClientRect();
+                    if (rect.width === 0 || rect.height === 0) {
+                        setTimeout(() => this.initViewer(), 100);
+                        return;
+                    }
+                    
+                    const config = { 
+                        backgroundColor: this.currentBackground,
+                        width: rect.width,
+                        height: rect.height
+                    };
+                    
+                    this.viewer = $3Dmol.createViewer(element, config);
+                    
+                    element.style.position = 'relative';
+                    element.style.overflow = 'hidden';
+                }
+
+                renderMolecule(xyzData) {
+                    try {
+                        this.viewer.addModel(xyzData, "xyz");
+                        this.updateStyle();
+                        this.viewer.zoomTo();
+                        this.viewer.render();
+                        this.updateMoleculeName(xyzData);
+                        
+                        // 更新菜单选中状态
+                        this.updateStyleMenuSelection();
+                        this.updateBackgroundMenuSelection();
+                    } catch (error) {
+                        this.showError('分子渲染失败: ' + error.message);
+                        this.showEditor();
+                    }
+                }
+
+                updateMoleculeName(xyzData) {
+                    const lines = xyzData.trim().split('\n');
+                    if (lines.length >= 2) {
+                        const name = lines[1].trim();
+                        this.moleculeName.textContent = name || '分子结构';
+                    } else {
+                        this.moleculeName.textContent = '分子结构';
+                    }
+                }
+
+                updateStyle() {
+                    if (!this.viewer) return;
+
+                    this.viewer.setStyle({}, {});
+
+                    switch (this.currentStyle) {
+                        case 'stick':
+                            this.viewer.setStyle({}, {stick: {}, sphere: {scale: 0.3}});
+                            break;
+                        case 'sphere':
+                            this.viewer.setStyle({}, {sphere: {scale: 0.8}});
+                            break;
+                        case 'line':
+                            this.viewer.setStyle({}, {line: {}});
+                            break;
+                    }
+                    this.viewer.render();
+                }
+
+                updateBackground() {
+                    if (!this.viewer) return;
+                    this.viewer.setBackgroundColor(this.currentBackground);
+                    this.viewer.render();
+                }
+
+                resetView() {
+                    if (!this.viewer) return;
+                    this.viewer.zoomTo();
+                    this.viewer.render();
+                    this.viewer.removeAllLabels();
+                    this.savedViewState = null;
+                    this.isViewLocked = false;
+                    this.showingAtomLabels = false;
+                    this.toggleAtomLabelsButton.style.backgroundColor = '';
+                    this.viewLocked.classList.add('hidden');
+                    this.showSuccess('视图已重置，锁定状态已清除');
+                }
+
+                showSuccess(message) {
+                    this.successMessage.textContent = message;
+                    this.successToast.classList.remove('hidden');
+                    setTimeout(() => {
+                        this.successToast.classList.add('hidden');
+                    }, 3000);
+                }
+
+                showError(message) {
+                    this.errorMessage.textContent = message;
+                    this.errorModal.classList.remove('hidden');
+                    this.errorModal.classList.add('flex');
+                }
+
+                hideErrorModal() {
+                    this.errorModal.classList.add('hidden');
+                    this.errorModal.classList.remove('flex');
+                }
+            }
+
+            // 初始化挂件
+            document.addEventListener('DOMContentLoaded', () => {
+                new SiyuanMoleculeWidget();
+            });
+        </script>
+    </body>
+    </html>

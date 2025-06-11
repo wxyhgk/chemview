@@ -1,0 +1,28 @@
+{
+  "name": "chemview",
+  "author": "CeFrumoasaEIubirea",
+  "url": "https://github.com/wxyhgk/chemview",
+  "version": "1.0",
+  "minAppVersion": "3.1.9",
+  "displayName": {
+    "default": "chemview",
+    "zh_CN": "chemview"
+  },
+  "description": {
+    "default": "chemview widget.",
+    "zh_CN": "chemview"
+  },
+  "readme": {
+    "default": "README.md"
+  },
+  "funding": {
+    "openCollective": "",
+    "patreon": "",
+    "github": "",
+    "custom": []
+  },
+  "keywords": [
+    "分子可视化", "化学"
+  ]
+}
+
